@@ -21,7 +21,7 @@
 
 #define IP4_LEN_STR_MAX_PLUS_NEW_LINE 17
 #define MAC_LEN_STR_MAX 18
-#define STR_FILE_NAME "IPs.txt"
+#define STR_FILE_NAME "/root/myarpspoof/IPs.txt"
 
 struct _IPsMacs
 {
@@ -44,7 +44,8 @@ char g_strGateWayIP[IP4_LEN_STR_MAX_PLUS_NEW_LINE - 1];
 char g_strGateWayMAC[MAC_LEN_STR_MAX];
 char g_str_eth[16];
 
-#define TRACE(Arg...)	printf( Arg );printf( "\n" );
+//#define TRACE(Arg...)	printf( Arg );printf( "\n" );
+#define TRACE(Arg...)
 
 void LogMsg(char* pMsg)
 {
@@ -134,9 +135,11 @@ void Create_and_Send_ARP_RequestFrame(const char* strIP_target)
 
 	//without it the arp table in kernel does not applies an arp response
 	memcpy(&g_sin.sin_addr.s_addr, &arphdr.target_ip, 4);
-	if (sendto(g_udp_sock, NULL, 0, 0, (struct sockaddr *) &g_sin,
-			sizeof(g_sin)) < 0)
+	if (sendto(g_udp_sock, NULL, 0, 0, (struct sockaddr *) &g_sin, sizeof(g_sin)) < 0)
+	{
+		fprintf(stderr, "sendto failed on line %d", __LINE__);
 		exit(EXIT_FAILURE);
+	}
 
 	// Target hardware address (48 bits): zero, since we don't know it yet.
 	memset(&arphdr.target_mac, 0, 6 * sizeof(uint8_t));
@@ -255,15 +258,15 @@ void CreatePacketToGateway(_IPsMacs* pArpEntry)
 	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	unsigned char binGateWayMAC[6];
 	if (6
-			!= sscanf((const char *) g_strGateWayMAC, "%2x:%2x:%2x:%2x:%2x:%2x",
-					(unsigned int*) &binGateWayMAC[0],
-					(unsigned int*) &binGateWayMAC[1],
-					(unsigned int*) &binGateWayMAC[2],
-					(unsigned int*) &binGateWayMAC[3],
-					(unsigned int*) &binGateWayMAC[4],
-					(unsigned int*) &binGateWayMAC[5]))
+			!= sscanf((const char *) g_strGateWayMAC, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+					&binGateWayMAC[0],
+					&binGateWayMAC[1],
+					&binGateWayMAC[2],
+					&binGateWayMAC[3],
+					&binGateWayMAC[4],
+					&binGateWayMAC[5]))
 	{
-		fprintf(stderr, "%s, sscanf failed", __PRETTY_FUNCTION__);
+		fprintf(stderr, "%s, sscanf failed at line %d", __PRETTY_FUNCTION__, __LINE__);
 		exit(2);
 	}
 	memcpy(pArpEntry->arp_frame_2gateway, binGateWayMAC, 6);
@@ -298,15 +301,15 @@ void CreatePacketToVictim(_IPsMacs* pArpEntry)
 {
 	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	if (6
-			!= sscanf((const char *) pArpEntry->mac, "%2x:%2x:%2x:%2x:%2x:%2x",
-					(unsigned int*) &pArpEntry->mac_bin[0],
-					(unsigned int*) &pArpEntry->mac_bin[1],
-					(unsigned int*) &pArpEntry->mac_bin[2],
-					(unsigned int*) &pArpEntry->mac_bin[3],
-					(unsigned int*) &pArpEntry->mac_bin[4],
-					(unsigned int*) &pArpEntry->mac_bin[5]))
+			!= sscanf((const char *) pArpEntry->mac, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+					&pArpEntry->mac_bin[0],
+					&pArpEntry->mac_bin[1],
+					&pArpEntry->mac_bin[2],
+					&pArpEntry->mac_bin[3],
+					&pArpEntry->mac_bin[4],
+					&pArpEntry->mac_bin[5]))
 	{
-		fprintf(stderr, "%s, sscanf failed", __PRETTY_FUNCTION__);
+		fprintf(stderr, "%s, sscanf failed at line %d", __PRETTY_FUNCTION__, __LINE__);
 		exit(2);
 	}
 	memcpy(pArpEntry->arp_frame_2victim, pArpEntry->mac_bin, 6);
@@ -351,6 +354,7 @@ void DoARP_Spoof()
 			char tmp_ip[IP4_LEN_STR_MAX_PLUS_NEW_LINE];
 			char tmp_mac[MAC_LEN_STR_MAX];
 
+			TRACE("Processing line: '%s'", strLine);
 			unsigned int arp_status_flag; //0x0 incomplete, 0x2 complete, 0x6 complete and manually set
 			if (3
 					!= sscanf(strLine, "%s %*s %x %s %*s %*s\n", tmp_ip,
@@ -436,8 +440,8 @@ void ParseCmdLineParameters(int argc, char **argv)
 	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	if (argc != 7)
 	{
-		fprintf(stderr, "Usage: %s -i eth0 -g 192.168.0.1 -m 10:FE:11:11:11:11",
-				optarg);
+		fprintf(stderr, "Usage: %s -i eth0 -g 192.168.0.1 -m 10:FE:11:11:11:11\n",
+				argv[0]);
 		exit(EXIT_FAILURE);
 	}
 	int opt;
@@ -472,7 +476,7 @@ void ParseCmdLineParameters(int argc, char **argv)
 
 		default:
 			fprintf(stderr,
-					"Usage: myarpspoof -i eth0 -g 192.168.0.1 -m 10:FE:11:11:11:11\n");
+					"Usage: myarpspoof -i st2770.0 -g 192.168.0.1 -m 10:fe:ed:e5:c2:b4\n");
 			break;
 		}
 	}
